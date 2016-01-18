@@ -180,6 +180,7 @@ while true {
 
         let buf = UnsafeMutablePointer<CChar>(buffer)
         let count: Int = read(ev.data.fd, buf, 512)
+        //print("Read: \(count)")
         if count == -1 {
           /* If errno == EAGAIN, that means we have read all
              data. So go back to the main loop. */
@@ -196,7 +197,7 @@ while true {
           break
         }
         
-        if let str = String.fromCString(Array(UnsafeBufferPointer(start: buf, count: count))) {
+        if let str = String.fromCString(buffer) {
           print(str, terminator: "")
         }
       }
