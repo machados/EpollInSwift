@@ -10,17 +10,23 @@ Building
 
 To build enter:
 
-  swift build
+```
+swift build
+```
 
 Running
 -------
 
 To run enter:
 
-  .build/debug/EpollInSwift
+```
+.build/debug/EpollInSwift
+```
 
 Then start telnet on another terminal, for example:
 
-  telnet 192.168.1.1 8080
+```
+telnet 192.168.1.1 8080
+```
 
 If the connection is established successfully anything you time will be printed on the server.
