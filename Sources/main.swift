@@ -1,79 +1,110 @@
 import Foundation
 import Glibc
 import GlibcExtras
-//import CLibEvent
 
-func createAndBind(port: String) -> Int32 {
-  let hints = UnsafeMutablePointer<addrinfo>.alloc(1)
-  defer { hints.dealloc(1) }
+enum SocketError: ErrorType {
+  case GetAddress(String?)
+  case Create
+  case Bind
+  case FlagSet
+  case Listen
+}
 
-  hints.memory.ai_family = AF_UNSPEC
-  hints.memory.ai_socktype = unsafeBitCast(SOCK_STREAM, Int32.self)
-  hints.memory.ai_flags = AI_PASSIVE
+class Socket {
+  let port: String
 
-  var result = UnsafeMutablePointer<addrinfo>()
-  defer { freeaddrinfo(result) }
-  let res = getaddrinfo(nil, port, hints, &result)
-
-  print(res)
-  if res != 0 {
-    let msg = String.fromCString(gai_strerror(res)) ?? "No error description."
-    fatalError("Error: " + msg)
+  private var _socket: Int32
+  var socket: Int32 { 
+    get {
+      return self._socket 
+    }
   }
 
-  var sfd:Int32 = -1
-  var rp = result;
-  repeat {
-    defer { rp = UnsafeMutablePointer<addrinfo>(rp.memory.ai_next) }
+  init(port: String) throws {
+    self.port = port
+    self._socket = createAndBind(port)
+  }
 
-    sfd = socket(rp.memory.ai_family, rp.memory.ai_socktype, rp.memory.ai_protocol)
+  deinit {
+    close(self._socket);
+  }
 
-    if sfd == -1 { 
-      print("Unable to create socket")
-      continue 
+  private func createAndBind(port: String) throws -> Int32 {
+    let hints = UnsafeMutablePointer<addrinfo>.alloc(1)
+    defer { hints.dealloc(1) }
+
+    hints.memory.ai_family = AF_UNSPEC
+    hints.memory.ai_socktype = unsafeBitCast(SOCK_STREAM, Int32.self)
+    hints.memory.ai_flags = AI_PASSIVE
+
+    var result = UnsafeMutablePointer<addrinfo>()
+    defer { freeaddrinfo(result) }
+    let res = getaddrinfo(nil, port, hints, &result)
+
+    print(res)
+    if res != 0 {
+      throw SocketError.GetAddress(String.fromCString(gai_strerror(res)))
     }
-    print("Socket created successfully")
 
-    let s = bind(sfd, rp.memory.ai_addr, rp.memory.ai_addrlen)
-    if s == 0 { 
-      print("Socket bound successfully")
-      break 
-    }
+    var sfd:Int32 = -1
+    var rp = result;
+    repeat {
+      defer { rp = UnsafeMutablePointer<addrinfo>(rp.memory.ai_next) }
+
+      sfd = Glibc.socket(rp.memory.ai_family, rp.memory.ai_socktype, rp.memory.ai_protocol)
+
+      if sfd == -1 { 
+        throw SocketError.Create
+      }
+
+      let s = bind(sfd, rp.memory.ai_addr, rp.memory.ai_addrlen)
+      if s == 0 { 
+        print("Socket bound successfully")
+        break 
+      }
+      
+      close(sfd)
+      sfd = -1
+    } while rp != nil
     
-    close(sfd)
-    print("Unable to bind socket")
-  } while rp != nil
+    if sfd == -1 {
+      throw SocketError.Bind
+    }
 
-  return sfd
-}
-
-func makeSocketNonBlocking(sfd: Int32) -> Int {
-  let flags = fcntl(sfd, F_GETFL, 0)
-  if flags == -1 {
-    print("Unable to get socket flags")
-    return -1
+    return sfd
   }
 
-  let newFlags = flags | O_NONBLOCK
-  let s = fcntl(sfd, F_SETFL, newFlags)
-  if s == -1 {
-    print("Unable to set non-blocking flag")
-    return -1
+  func makeNonBlocking() throws {
+    let flags = fcntl(self.socket, F_GETFL, 0)
+    if flags == -1 {
+      print("Unable to get socket flags")
+      throw SocketError.FlagSet
+    }
+
+    let newFlags = flags | O_NONBLOCK
+    let s = fcntl(self.socket, F_SETFL, newFlags)
+    if s == -1 {
+      print("Unable to set non-blocking flag")
+      throw SocketError.FlagSet
+    }
   }
 
-  return 0
+  func listen() throws {
+    if listen(sfd, SOMAXCONN) == -1 {
+      throw SocketError.Listen
+    }
+  }
 }
 
-let sfd = createAndBind("8080")
-defer { close(sfd) }
-
-if makeSocketNonBlocking(sfd) != 0 {
-  fatalError("Unable to make socket non-blocking")
+let socket: Socket?
+do {
+  socket = try Socket(port: "8080")
+  try socket.makeNonBlocking() 
+  try socket.listen()
+} catch _ {
+    fatalError("Unable to create or configure socket")
 }
-
-if listen(sfd, SOMAXCONN) == -1 {
-  fatalError("Unable to listen on socket")
-}
+defer { socket.close() }
 
 let efd = epoll_create1(0)
 if efd == -1 {
